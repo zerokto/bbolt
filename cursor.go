@@ -20,8 +20,8 @@ import (
 // and return unexpected keys and/or values. You must reposition your cursor
 // after mutating data.
 type Cursor struct {
-	bucket *Bucket
-	stack  []elemRef
+	bucket *Bucket   // 表示当前游标所在的桶
+	stack  []elemRef // 维护遍历过程中访问的元素引用
 }
 
 // Bucket returns the bucket that this cursor was created from.
@@ -35,6 +35,8 @@ func (c *Cursor) Bucket() *Bucket {
 func (c *Cursor) First() (key []byte, value []byte) {
 	common.Assert(c.bucket.tx.db != nil, "tx closed")
 	k, v, flags := c.first()
+
+	// 嵌套的桶的value返回nil
 	if (flags & uint32(common.BucketLeafFlag)) != 0 {
 		return k, nil
 	}
@@ -42,21 +44,31 @@ func (c *Cursor) First() (key []byte, value []byte) {
 }
 
 func (c *Cursor) first() (key []byte, value []byte, flags uint32) {
+	// 清空游标的堆栈
 	c.stack = c.stack[:0]
+	// 获取根页面或节点
 	p, n := c.bucket.pageNode(c.bucket.RootPage())
+	// 将根页面或节点推入堆栈
 	c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
+
+	// 将游标移动到堆栈上的第一个元素
 	c.goToFirstElementOnTheStack()
 
 	// If we land on an empty page then move to the next value.
 	// https://github.com/boltdb/bolt/issues/450
+	// 如果落在一个空页面上，则移动到下一个值
 	if c.stack[len(c.stack)-1].count() == 0 {
 		c.next()
 	}
 
+	// 获取当前键值和标志位
 	k, v, flags := c.keyValue()
+
+	// 如果是 inline bucket, value 返回 nil
 	if (flags & uint32(common.BucketLeafFlag)) != 0 {
 		return k, nil, flags
 	}
+
 	return k, v, flags
 }
 
@@ -65,15 +77,19 @@ func (c *Cursor) first() (key []byte, value []byte, flags uint32) {
 // The returned key and value are only valid for the life of the transaction.
 func (c *Cursor) Last() (key []byte, value []byte) {
 	common.Assert(c.bucket.tx.db != nil, "tx closed")
+	// clean stack
 	c.stack = c.stack[:0]
+	// get page and node
 	p, n := c.bucket.pageNode(c.bucket.RootPage())
 	ref := elemRef{page: p, node: n}
 	ref.index = ref.count() - 1
+
 	c.stack = append(c.stack, ref)
 	c.last()
 
 	// If this is an empty page (calling Delete may result in empty pages)
 	// we call prev to find the last page that is not empty
+	// 如果当前页面为空，则调用 prev 查找最后一个非空页面
 	for len(c.stack) > 1 && c.stack[len(c.stack)-1].count() == 0 {
 		c.prev()
 	}
@@ -158,6 +174,7 @@ func (c *Cursor) Delete() error {
 // If the key does not exist then the next key is used.
 func (c *Cursor) seek(seek []byte) (key []byte, value []byte, flags uint32) {
 	// Start from root page/node and traverse to correct page.
+	// 从根节点开始搜索
 	c.stack = c.stack[:0]
 	c.search(seek, c.bucket.RootPage())
 
@@ -281,6 +298,7 @@ func (c *Cursor) prev() (key []byte, value []byte, flags uint32) {
 
 // search recursively performs a binary search against a given page/node until it finds a given key.
 func (c *Cursor) search(key []byte, pgId common.Pgid) {
+	// 查找对应page 和 node
 	p, n := c.bucket.pageNode(pgId)
 	if p != nil && !p.IsBranchPage() && !p.IsLeafPage() {
 		panic(fmt.Sprintf("invalid page type: %d: %x", p.Id(), p.Flags()))

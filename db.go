@@ -58,11 +58,13 @@ type DB struct {
 	// ignored.  See the comment on that constant for more details.
 	//
 	// THIS IS UNSAFE. PLEASE USE WITH CAUTION.
+	// 设置此标志将导致数据库在每次提交后跳过 fsync() 调用
 	NoSync bool
 
 	// When true, skips syncing freelist to disk. This improves the database
 	// write performance under normal operation, but requires a full database
 	// re-sync during recovery.
+	// 跳过将空闲列表同步到磁盘
 	NoFreelistSync bool
 
 	// FreelistType sets the backend freelist type. There are two options. Array which is simple but endures
@@ -70,6 +72,7 @@ type DB struct {
 	// The alternative one is using hashmap, it is faster in almost all circumstances
 	// but it doesn't guarantee that it offers the smallest page id available. In normal case it is safe.
 	// The default type is array
+	// 设置后端空闲列表的类型。有两种选择，默认类型是数组
 	FreelistType FreelistType
 
 	// When true, skips the truncate call when growing the database.
@@ -245,6 +248,7 @@ func Open(path string, mode os.FileMode, options *Options) (db *DB, err error) {
 	// if !options.ReadOnly.
 	// The database file is locked using the shared lock (more than one process may
 	// hold a lock at the same time) otherwise (options.ReadOnly is set).
+	// 锁定文件，以防止在读写模式下的并发访问导致数据损坏
 	if err = flock(db, !db.readOnly, options.Timeout); err != nil {
 		_ = db.close()
 		lg.Errorf("failed to lock db file (%s), readonly: %t, error: %v", path, db.readOnly, err)
@@ -254,6 +258,7 @@ func Open(path string, mode os.FileMode, options *Options) (db *DB, err error) {
 	// Default values for test hooks
 	db.ops.writeAt = db.file.WriteAt
 
+	// 如果没有提供页面大小，则使用默认值
 	if db.pageSize = options.PageSize; db.pageSize == 0 {
 		// Set the default page size to the OS page size.
 		db.pageSize = common.DefaultPageSize

@@ -86,22 +86,27 @@ func (b *Bucket) Cursor() *Cursor {
 // Returns nil if the bucket does not exist.
 // The bucket instance is only valid for the lifetime of the transaction.
 func (b *Bucket) Bucket(name []byte) *Bucket {
+
+	// 如果缓存中有就直接返回
 	if b.buckets != nil {
 		if child := b.buckets[string(name)]; child != nil {
 			return child
 		}
 	}
 
+	// 搜索
 	// Move cursor to key.
 	c := b.Cursor()
 	k, v, flags := c.seek(name)
 
 	// Return nil if the key doesn't exist or it is not a bucket.
+	// 找不到这个key或者不是一个桶直接返回nil
 	if !bytes.Equal(name, k) || (flags&common.BucketLeafFlag) == 0 {
 		return nil
 	}
 
 	// Otherwise create a bucket and cache it.
+	// 否则创建一个新的桶，并缓存
 	var child = b.openBucket(v)
 	if b.buckets != nil {
 		b.buckets[string(name)] = child
@@ -120,6 +125,8 @@ func (b *Bucket) openBucket(value []byte) *Bucket {
 		common.InBucket
 		common.Page
 	}{}) - 1
+
+	// true 不对齐
 	unaligned := uintptr(unsafe.Pointer(&value[0]))&unalignedMask != 0
 	if unaligned {
 		value = cloneBytes(value)
@@ -927,7 +934,7 @@ func (b *Bucket) dereference() {
 func (b *Bucket) pageNode(id common.Pgid) (*common.Page, *node) {
 	// Inline buckets have a fake page embedded in their value so treat them
 	// differently. We'll return the rootNode (if available) or the fake page.
-	if b.RootPage() == 0 {
+	if b.RootPage() == 0 { // inline bucket
 		if id != 0 {
 			panic(fmt.Sprintf("inline bucket non-zero page access(2): %d != 0", id))
 		}

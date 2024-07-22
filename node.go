@@ -12,16 +12,17 @@ import (
 type node struct {
 	bucket     *Bucket
 	isLeaf     bool
-	unbalanced bool
-	spilled    bool
-	key        []byte
-	pgid       common.Pgid
-	parent     *node
-	children   nodes
-	inodes     common.Inodes
+	unbalanced bool          // 处于不平衡的状态
+	spilled    bool          // 节点溢出
+	key        []byte        // 该节点的key
+	pgid       common.Pgid   // 该节点对应的pageID
+	parent     *node         // 指向该节点的父节点
+	children   nodes         // 该节点的子节点集合
+	inodes     common.Inodes // 该节点的条目
 }
 
 // root returns the top-level node this node is attached to.
+// 递归到root节点
 func (n *node) root() *node {
 	if n.parent == nil {
 		return n
@@ -30,6 +31,7 @@ func (n *node) root() *node {
 }
 
 // minKeys returns the minimum number of inodes this node should have.
+
 func (n *node) minKeys() int {
 	if n.isLeaf {
 		return 1
@@ -75,6 +77,8 @@ func (n *node) childAt(index int) *node {
 	if n.isLeaf {
 		panic(fmt.Sprintf("invalid childAt(%d) on a leaf node", index))
 	}
+
+	// 确保能够正确被加载出来，从持久化存储中
 	return n.bucket.node(n.inodes[index].Pgid(), n)
 }
 
@@ -302,6 +306,8 @@ func (n *node) spill() error {
 	// the case of split-merge so we cannot use a range loop. We have to check
 	// the children size on every loop iteration.
 	sort.Sort(n.children)
+
+	// 递归处理子节点
 	for i := 0; i < len(n.children); i++ {
 		if err := n.children[i].spill(); err != nil {
 			return err
@@ -312,15 +318,17 @@ func (n *node) spill() error {
 	n.children = nil
 
 	// Split nodes into appropriate sizes. The first node will always be n.
+	// 将节点按照 pageSize 分裂成多个
 	var nodes = n.split(uintptr(tx.db.pageSize))
+
 	for _, node := range nodes {
 		// Add node's page to the freelist if it's not new.
-		if node.pgid > 0 {
+		if node.pgid > 0 { // 释放旧的
 			tx.db.freelist.Free(tx.meta.Txid(), tx.page(node.pgid))
 			node.pgid = 0
 		}
 
-		// Allocate contiguous space for the node.
+		// Allocate contiguous space for the node. 分配新的 page : p
 		p, err := tx.allocate((node.size() + tx.db.pageSize - 1) / tx.db.pageSize)
 		if err != nil {
 			return err
@@ -330,11 +338,13 @@ func (n *node) spill() error {
 		if p.Id() >= tx.meta.Pgid() {
 			panic(fmt.Sprintf("pgid (%d) above high water mark (%d)", p.Id(), tx.meta.Pgid()))
 		}
+
+		// 写入数据
 		node.pgid = p.Id()
 		node.write(p)
 		node.spilled = true
 
-		// Insert into parent inodes.
+		// Insert into parent inodes. 将节点插入到父节点的inodes中
 		if node.parent != nil {
 			var key = node.key
 			if key == nil {
@@ -373,7 +383,7 @@ func (n *node) rebalance() {
 
 	// Ignore if node is above threshold (25% when FillPercent is set to DefaultFillPercent) and has enough keys.
 	var threshold = int(float64(n.bucket.tx.db.pageSize)*n.bucket.FillPercent) / 2
-	if n.size() > threshold && len(n.inodes) > n.minKeys() {
+	if n.size() > threshold && len(n.inodes) > n.minKeys() { // 不需要
 		return
 	}
 
@@ -497,33 +507,6 @@ func (n *node) free() {
 		n.pgid = 0
 	}
 }
-
-// dump writes the contents of the node to STDERR for debugging purposes.
-/*
-func (n *node) dump() {
-	// Write node header.
-	var typ = "branch"
-	if n.isLeaf {
-		typ = "leaf"
-	}
-	warnf("[NODE %d {type=%s count=%d}]", n.pgid, typ, len(n.inodes))
-
-	// Write out abbreviated version of each item.
-	for _, item := range n.inodes {
-		if n.isLeaf {
-			if item.flags&bucketLeafFlag != 0 {
-				bucket := (*bucket)(unsafe.Pointer(&item.value[0]))
-				warnf("+L %08x -> (bucket root=%d)", trunc(item.key, 4), bucket.root)
-			} else {
-				warnf("+L %08x -> %08x", trunc(item.key, 4), trunc(item.value, 4))
-			}
-		} else {
-			warnf("+B %08x -> pgid=%d", trunc(item.key, 4), item.pgid)
-		}
-	}
-	warn("")
-}
-*/
 
 func compareKeys(left, right []byte) int {
 	return bytes.Compare(left, right)

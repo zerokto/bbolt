@@ -7,9 +7,9 @@ import "unsafe"
 // to an element which hasn't been added to a page yet.
 type Inode struct {
 	flags uint32
-	pgid  Pgid
-	key   []byte
-	value []byte
+	pgid  Pgid   // 指向的页面
+	key   []byte // 键
+	value []byte // 值
 }
 
 type Inodes []Inode
