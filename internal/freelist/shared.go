@@ -10,18 +10,18 @@ import (
 )
 
 type txPending struct {
-	ids              []common.Pgid
-	alloctx          []common.Txid // txids allocating the ids
-	lastReleaseBegin common.Txid   // beginning txid of last matching releaseRange
+	ids              []common.Pgid // 页面 ID 列表
+	alloctx          []common.Txid // txids allocating the ids 分配这些页面的事务 ID 列表
+	lastReleaseBegin common.Txid   // beginning txid of last matching releaseRange 上次匹配释放范围的事务 ID 开始
 }
 
 type shared struct {
 	Interface
 
 	readonlyTXIDs []common.Txid               // all readonly transaction IDs.
-	allocs        map[common.Pgid]common.Txid // mapping of Txid that allocated a pgid.
-	cache         map[common.Pgid]struct{}    // fast lookup of all free and pending page ids.
-	pending       map[common.Txid]*txPending  // mapping of soon-to-be free page ids by tx.
+	allocs        map[common.Pgid]common.Txid // mapping of Txid that allocated a pgid.页面 ID 到分配事务 ID 的映射。
+	cache         map[common.Pgid]struct{}    // fast lookup of all free and pending page ids. 空闲和待处理页面 ID 的快速查找。
+	pending       map[common.Txid]*txPending  // mapping of soon-to-be free page ids by tx. 即将被释放的页面 ID 映射到事务。
 }
 
 func newShared() *shared {
@@ -53,6 +53,7 @@ func (t *shared) Freed(pgId common.Pgid) bool {
 	return ok
 }
 
+// 将页面标记为待释放，并记录在 pending 列表中
 func (t *shared) Free(txid common.Txid, p *common.Page) {
 	if p.Id() <= 1 {
 		panic(fmt.Sprintf("cannot free page 0 or 1: %d", p.Id()))
@@ -64,6 +65,7 @@ func (t *shared) Free(txid common.Txid, p *common.Page) {
 		txp = &txPending{}
 		t.pending[txid] = txp
 	}
+
 	allocTxid, ok := t.allocs[p.Id()]
 	if ok {
 		delete(t.allocs, p.Id())
@@ -84,6 +86,7 @@ func (t *shared) Free(txid common.Txid, p *common.Page) {
 	}
 }
 
+// 回滚事务中已经释放的页面，并将其恢复到空闲链表中
 func (t *shared) Rollback(txid common.Txid) {
 	// Remove page ids from cache.
 	txp := t.pending[txid]
@@ -92,12 +95,12 @@ func (t *shared) Rollback(txid common.Txid) {
 	}
 	var m common.Pgids
 	for i, pgid := range txp.ids {
-		delete(t.cache, pgid)
+		delete(t.cache, pgid) // 去除空闲页面标记
 		tx := txp.alloctx[i]
 		if tx == 0 {
 			continue
 		}
-		if tx != txid {
+		if tx != txid { // 不是当前事务，恢复到alloc中
 			// Pending free aborted; restore page back to alloc list.
 			t.allocs[pgid] = tx
 		} else {
@@ -106,6 +109,7 @@ func (t *shared) Rollback(txid common.Txid) {
 		}
 	}
 	// Remove pages from pending list and mark as free if allocated by txid.
+	// 从 pending 列表中删除当前事务 ID (txid) 对应的条目
 	delete(t.pending, txid)
 	t.mergeSpans(m)
 }
@@ -150,6 +154,7 @@ func (t *shared) ReleasePendingPages() {
 	// Any page both allocated and freed in an extent is safe to release.
 }
 
+// 释放指定事务 ID 之前的所有页面
 func (t *shared) release(txid common.Txid) {
 	m := make(common.Pgids, 0)
 	for tid, txp := range t.pending {

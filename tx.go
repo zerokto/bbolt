@@ -25,14 +25,14 @@ import (
 // are using them. A long running read transaction can cause the database to
 // quickly grow.
 type Tx struct {
-	writable       bool
-	managed        bool
-	db             *DB
-	meta           *common.Meta
-	root           Bucket
-	pages          map[common.Pgid]*common.Page
-	stats          TxStats
-	commitHandlers []func()
+	writable       bool                         // 是否可写
+	managed        bool                         // 是否被管理
+	db             *DB                          // 数据库引用
+	meta           *common.Meta                 // 元信息
+	root           Bucket                       // 根桶
+	pages          map[common.Pgid]*common.Page // 页面映射
+	stats          TxStats                      // 事务统计信息
+	commitHandlers []func()                     // 提交处理函数
 
 	// WriteFlag specifies the flag for write-related methods like WriteTo().
 	// Tx opens the database file with the specified flag to copy the data.
@@ -40,6 +40,11 @@ type Tx struct {
 	// By default, the flag is unset, which works well for mostly in-memory
 	// workloads. For databases that are much larger than available RAM,
 	// set the flag to syscall.O_DIRECT to avoid trashing the page cache.
+	// WriteFlag 指定用于写相关方法（如 WriteTo()）的标志。
+	// Tx 使用指定的标志打开数据库文件以复制数据。
+	//
+	// 默认情况下，该标志未设置，这对主要在内存中的工作负载效果很好。
+	// 对于比可用 RAM 大得多的数据库，设置标志为 syscall.O_DIRECT 以避免破坏页面缓存。
 	WriteFlag int
 }
 
@@ -79,6 +84,7 @@ func (tx *Tx) DB() *DB {
 
 // Size returns current database size in bytes as seen by this transaction.
 func (tx *Tx) Size() int64 {
+	// 当前事务的页面数量 * 页面大小
 	return int64(tx.meta.Pgid()) * int64(tx.db.pageSize)
 }
 
